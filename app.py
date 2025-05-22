@@ -16,27 +16,21 @@ def load_model_components():
         pipeline = joblib.load('prediction_pipeline.joblib')
         mlb_topics = joblib.load('mlb_topics.joblib')
         mlb_impact = joblib.load('mlb_impact.joblib')
+        mlb_continents = joblib.load('mlb_continents.joblib') # Load mlb_continents
         infrequent_topics = joblib.load('infrequent_topics.joblib')
         feature_columns = joblib.load('feature_columns.joblib')
 
         # Extract unique categories from the OneHotEncoder in the loaded pipeline
-        # Find the 'cat' transformer using named_transformers_
-        # This accesses the *fitted* transformer
         ohe_transformer = pipeline.named_steps['preprocessor'].named_transformers_['cat']
 
-        if ohe_transformer is None: # This check might be redundant if 'cat' is guaranteed
-            raise ValueError("OneHotEncoder transformer ('cat') not found in the pipeline!")
-
-        # Map features to their categories using the features list from the preprocessor
-        # and the categories_ from the OHE transformer
         unique_categories = {}
-        # Get the feature names the OHE was trained on (from the pipeline's preprocessor)
-        ohe_features_trained_on = pipeline.named_steps['preprocessor'].named_transformers_['cat'].feature_names_in_
-        for i, feature_name in enumerate(ohe_features_trained_on):
-            unique_categories[feature_name] = ohe_transformer.categories_[i].tolist()
+        if ohe_transformer is not None and hasattr(ohe_transformer, 'categories_'):
+            ohe_features_trained_on = pipeline.named_steps['preprocessor'].named_transformers_['cat'].feature_names_in_
+            for i, feature_name in enumerate(ohe_features_trained_on):
+                unique_categories[feature_name] = ohe_transformer.categories_[i].tolist()
 
 
-        return pipeline, mlb_topics, mlb_impact, infrequent_topics, feature_columns, unique_categories
+        return pipeline, mlb_topics, mlb_impact, mlb_continents, infrequent_topics, feature_columns, unique_categories # Return mlb_continents
     except FileNotFoundError:
         print("ERROR: Model components not found. Please run the training script first.")
         raise
@@ -45,15 +39,16 @@ def load_model_components():
         raise
 
 # Load components globally
-pipeline, mlb_topics, mlb_impact, infrequent_topics, feature_columns, unique_categories = load_model_components()
+pipeline, mlb_topics, mlb_impact, mlb_continents, infrequent_topics, feature_columns, unique_categories = load_model_components() # Unpack mlb_continents
 
-
-# Prepare topic/impact options for the UI (mlb_topics.classes_ and mlb_impact.classes_ are already sorted)
-# Ensure 'other' is in topics if it was used in training
+# Prepare topic/impact/continent options for the UI (mlb_classes_ are already sorted)
 all_mlb_topics = sorted(mlb_topics.classes_.tolist())
 if "other" not in all_mlb_topics: # Add 'other' if it's not naturally a class (e.g., if no topics were infrequent during training)
     all_mlb_topics.append("other")
 all_mlb_impacts = sorted(mlb_impact.classes_.tolist())
+
+# Prepare continent options for the UI
+all_mlb_continents = sorted(mlb_continents.classes_.tolist())
 
 
 # --- 2. Define the User Interface (UI) ---
@@ -68,27 +63,22 @@ app_ui = ui.page_fluid(
             ui.h4("Numerical Inputs"),
             ui.input_numeric("project_length_days", "Project Length (days)", value=365, min=0, max=3650),
             ui.input_numeric("number_of_organizations", "Number of Organizations", value=1, min=1, max=100),
-            # 'sustainability' is now categorical, so it should be a select input
-            # ui.input_numeric("sustainability", "Sustainability Score (0.0 to 1.0)", value=0.5, min=0.0, max=1.0, step=0.01),
-            # ui.input_radio_buttons("sme", "Is it an SME?", choices={"1": "Yes", "0": "No"}, selected="0"), # If SME is not in trained features, remove this
 
             ui.h4("Categorical Inputs"),
             ui.input_select("legal_basis", "Legal Basis", choices=unique_categories.get('legalBasis', [])),
             ui.input_select("funding_scheme", "Funding Scheme", choices=unique_categories.get('fundingScheme', [])),
             ui.input_select("scientific_domain", "Scientific Domain", choices=unique_categories.get('scientific_domain', [])),
-            # Add 'sustainability' here as a categorical input if it's OHE'd
             ui.input_select("sustainability", "Sustainability", choices=unique_categories.get('sustainability', [])),
-            # If 'continent' is a categorical feature, add it here:
-            ui.input_select("continent", "Continent", choices=unique_categories.get('continent', [])),
-            # If activityType is a categorical feature, add it here:
-            # ui.input_select("activity_type", "Activity Type", choices=unique_categories.get('activityType', [])),
+            # Remove ui.input_select("continent", ...) here as it's now handled by MLB
+            # ui.input_select("continent", "Continent", choices=unique_categories.get('continent', [])),
         ),
         # The main content goes directly after ui.sidebar() within ui.page_sidebar
-        ui.h3("Topics and Impact"),
+        ui.h3("Topics, Impact, and Continents"), # Updated heading
         ui.layout_column_wrap(
-            1/2, # This means each element will take up 1/2 of the available width (creating two columns)
+            1/3, # Adjust column wrap to accommodate continents (now 3 columns)
             ui.input_checkbox_group("selected_main_topics", "Main Topics (select one or more)", choices=all_mlb_topics),
             ui.input_checkbox_group("selected_expected_impact", "Expected Impact (select one or more)", choices=all_mlb_impacts),
+            ui.input_checkbox_group("selected_continents", "Continents Involved (select one or more)", choices=all_mlb_continents), # NEW: Continent input
         ),
         ui.br(),
         ui.input_action_button("predict_button", "Predict Contribution", class_="btn-primary"),
@@ -100,7 +90,6 @@ app_ui = ui.page_fluid(
 
 def server(input, output, session):
 
-    # Reactive value to store the prediction result
     prediction_result = reactive.Value(None)
 
     @reactive.Effect
@@ -113,6 +102,9 @@ def server(input, output, session):
         if not input.selected_expected_impact():
             ui.notification_show("Please select at least one Expected Impact.", type="warning")
             return
+        if not input.selected_continents(): # You might want to make continent selection mandatory
+            ui.notification_show("Please select at least one Continent.", type="warning")
+            return
 
         try:
             # Prepare a dictionary for the input row
@@ -122,49 +114,53 @@ def server(input, output, session):
                 'legalBasis': input.legal_basis(),
                 'fundingScheme': input.funding_scheme(),
                 'scientific_domain': input.scientific_domain(),
-                'continent': input.continent(),
                 'sustainability': input.sustainability(),
+                # Removed 'continent' from here as it's now handled by MLB
             }
 
-            # --- Preprocess Main Topics ---
+            # --- Preprocess Main Topics (remains the same) ---
             processed_main_topics_for_mlb = [
                 topic.lower() if topic not in infrequent_topics else "other"
                 for topic in input.selected_main_topics()
             ]
-            main_topics_binary_array = mlb_topics.transform([processed_main_topics_for_mlb]).toarray()[0] # Get the single row
+            main_topics_binary_array = mlb_topics.transform([processed_main_topics_for_mlb]).toarray()[0]
             for i, topic_label in enumerate(mlb_topics.classes_):
                 col_name = f'topic_{topic_label.replace(' ', '_').replace('-', '_')}'
                 input_row_data[col_name] = main_topics_binary_array[i]
 
 
-            # --- Preprocess Expected Impact ---
+            # --- Preprocess Expected Impact (remains the same) ---
             processed_impact_for_mlb = [
                 impact.lower() for impact in input.selected_expected_impact()
             ]
-            impact_binary_array = mlb_impact.transform([processed_impact_for_mlb]).toarray()[0] # Get the single row
+            impact_binary_array = mlb_impact.transform([processed_impact_for_mlb]).toarray()[0]
             for i, impact_label in enumerate(mlb_impact.classes_):
                 col_name = f'impact_{impact_label.replace(' ', '_').replace('-', '_')}'
                 input_row_data[col_name] = impact_binary_array[i]
 
+            # --- NEW: Preprocess Continents using mlb_continents ---
+            processed_continents_for_mlb = [
+                continent.lower() for continent in input.selected_continents()
+            ]
+            continents_binary_array = mlb_continents.transform([processed_continents_for_mlb]).toarray()[0]
+            for i, continent_label in enumerate(mlb_continents.classes_):
+                col_name = f'continent_{continent_label.replace(' ', '_').replace('-', '_')}'
+                input_row_data[col_name] = continents_binary_array[i]
+
             # Create the final input DataFrame from the combined dictionary
-            # This ensures we always have one row and correct columns
             final_input_df = pd.DataFrame([input_row_data], columns=feature_columns).fillna(0)
 
             # Important: Reindex to ensure column order and presence, filling NaNs (for unselected OHEs) with 0
-            # .reindex ensures all columns from feature_columns are present.
-            # .fillna(0) handles any columns that were in feature_columns but not explicitly
-            # set in input_row_data (e.g., if a new category was added to training but not yet in UI options)
             final_input_df = final_input_df.reindex(columns=feature_columns, fill_value=0)
-
 
             # Make prediction
             prediction = pipeline.predict(final_input_df)[0]
-            prediction_result.set(prediction) # Update the reactive value
+            prediction_result.set(prediction)
 
         except Exception as e:
             ui.notification_show(f"An error occurred: {e}", type="danger")
-            prediction_result.set(None) # Clear prediction on error
-            print(f"Prediction error: {e}") # For debugging in console
+            prediction_result.set(None)
+            print(f"Prediction error: {e}")
 
     @output
     @render.text
