@@ -27,10 +27,35 @@ def load_model_components():
         unique_categories = {
             'legalBasis': ohe_categories[0].tolist(),
             'fundingScheme': ohe_categories[1].tolist(),
-            'scientific_domain': ohe_categories[2].tolist(),
+            'total_scientific_domain': ohe_categories[2].tolist(), # Rename to match your code, assuming this is correct
             'activityType': ohe_categories[3].tolist(),
             'country': ohe_categories[4].tolist()
         }
+
+        # IMPORTANT: Verify 'scientific_domain' from your training code matches 'total_scientific_domain' or adjust
+        # It seems there might be a mismatch here based on the original training code.
+        # If 'scientific_domain' was the actual column name for OHE, then keep it consistent.
+        # Assuming the first element of ohe_categories refers to 'legalBasis', second to 'fundingScheme', etc.
+        # Make sure this order matches what was passed to ColumnTransformer during training.
+        # For example, if 'scientific_domain' is at index 2 for the 'cat' transformer:
+        scientific_domain_index = -1
+        for i, (name, transformer, features) in enumerate(pipeline.named_steps['preprocessor'].transformers):
+            if name == 'cat':
+                for j, feature in enumerate(features):
+                    if feature == 'scientific_domain':
+                        scientific_domain_index = j
+                        break
+            if scientific_domain_index != -1:
+                break
+
+        if scientific_domain_index != -1:
+             unique_categories['scientific_domain'] = ohe_categories[scientific_domain_index].tolist()
+        else:
+             # Fallback or raise error if 'scientific_domain' isn't found
+             print("Warning: 'scientific_domain' not found in OHE categories. Please check your training script's ColumnTransformer.")
+             # You might want to handle this more robustly, e.g., by skipping this category
+             unique_categories['scientific_domain'] = []
+
 
         return pipeline, mlb_topics, svd_topics, mlb_impact, svd_impact, infrequent_topics, feature_columns, unique_categories
     except FileNotFoundError:
@@ -53,7 +78,6 @@ app_ui = ui.page_fluid(
 
     ui.hr(),
 
-    # Changed from ui.layout_sidebar to ui.page_sidebar
     ui.page_sidebar(
         ui.sidebar( # This is the sidebar content
             ui.h4("Numerical Inputs"),
@@ -69,8 +93,11 @@ app_ui = ui.page_fluid(
         ),
         # The main content goes directly after ui.sidebar() within ui.page_sidebar
         ui.h3("Topics and Impact"),
-        ui.input_checkbox_group("selected_main_topics", "Main Topics (select one or more)", choices=all_mlb_topics),
-        ui.input_checkbox_group("selected_expected_impact", "Expected Impact (select one or more)", choices=all_mlb_impacts),
+        ui.layout_column_wrap(
+            1/2, # This means each element will take up 1/2 of the available width (creating two columns)
+            ui.input_checkbox_group("selected_main_topics", "Main Topics (select one or more)", choices=all_mlb_topics),
+            ui.input_checkbox_group("selected_expected_impact", "Expected Impact (select one or more)", choices=all_mlb_impacts),
+        ),
         ui.br(),
         ui.input_action_button("predict_button", "Predict Contribution", class_="btn-primary"),
         ui.hr(),
