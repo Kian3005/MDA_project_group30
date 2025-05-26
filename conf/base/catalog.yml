@@ -1,0 +1,24 @@
+# Here you can define all your datasets by using simple YAML syntax.
+#
+# Documentation for this file format can be found in "The Data Catalog"
+# Link: https://docs.kedro.org/en/stable/data/data_catalog.html
+
+project_data_path:
+  type: kedro_datasets.pandas.ExcelDataset
+  filepath: data/project.xlsx 
+
+organization_data_path:
+  type: kedro_datasets.pandas.ExcelDataset
+  filepath: data/organization.xlsx 
+
+output_data_path:
+  type: kedro_datasets.pandas.ExcelDataset
+  filepath: data/project_output.xlsx
+
+fulldf:
+  type: kedro_datasets.pandas.ExcelDataset
+  filepath: data/fulldf.xlsx
+
+cleaned_df:
+  type: kedro_datasets.pandas.ExcelDataset
+  filepath: data/cleaned_df.xlsx
