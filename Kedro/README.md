@@ -1,6 +1,6 @@
 # MDA
 
-Data files are not included on this github repository since they are too large.
+Data files are not included in the data folder of kedro project on the github repository since they are too large.
 
 [![Powered by Kedro](https://img.shields.io/badge/powered_by-kedro-ffc900?logo=kedro)](https://kedro.org)
 
