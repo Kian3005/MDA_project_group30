@@ -1,0 +1,60 @@
+# ================================== Raw Processing Pipeline Parameters ================================== #
+# Renamed from 'topic_merging_params' to 'topic_merge_params' for consistency with error message
+topic_merge_params:
+  sentence_transformer_model: 'all-MiniLM-L6-v2'
+  topic_similarity_threshold: 0.50
+
+# ================================== Data Preprocessing Pipeline Parameters ================================== #
+# New parameter block as indicated by the error
+infrequent_topic_params:
+  # Add specific parameters related to infrequent topics here.
+  # For example:
+  min_topic_frequency: 0.05 # or some other threshold
+  other_topic_name: "Other" # what to name the merged infrequent topic
+  frequency_threshold_ratio: 0.01
+# Any other data preprocessing specific parameters can go here.
+# For example, parameters for multi-label binarization or handling missing values if you add them.
+
+# ============================ llm Pipeline ========================= #
+
+llm_merge_params:
+  similarity_threshold: 0.50
+  sentence_transformer_model: "all-MiniLM-L6-v2"
+
+# ================================== Model Training Pipeline Parameters ================================== #
+# Parameters for the outlier removal step (used in preprocess_and_clean_data node)
+outlier_removal_params:
+  iqr_multiplier: 2.0 # Set to 2.0 for 2*IQR method, 1.5 for standard IQR
+
+# General model training parameters
+model_training_params:
+  test_size: 0.2
+  train_test_split_random_state: 42 # For reproducibility of the train/test split
+  target_column_for_logging: "ecMaxContribution" # Just for logging/reference, actual target is log-transformed
+
+  # Parameters for the RandomForestRegressor itself
+  random_forest_regressor:
+    random_state: 42 # For reproducibility of the RandomForestRegressor
+
+  # Parameters for BayesSearchCV (hyperparameter tuning)
+  bayes_search_params:
+    n_iter: 40 # Number of search iterations for BayesSearchCV
+    scoring: 'neg_mean_squared_error' # Optimize for RMSE (by minimizing negative MSE)
+    cv: 5 # 5-fold cross-validation
+    n_jobs: -1 # Use all available CPU cores
+    random_state: 42 # For reproducibility of BayesSearchCV
+    verbose: 0 # Set to 1 or 2 for more detailed output during search
+
+  # Define the search space for RandomForestRegressor in BayesSearchCV
+  # These values will be converted to skopt.space objects in the node
+  bayes_search_space:
+    n_estimators: [50, 300]         # Integer range [min, max]
+    max_depth: [3, 20]             # Integer range [min, max]
+    min_samples_split: [2, 20]     # Integer range [min, max]
+    min_samples_leaf: [1, 10]      # Integer range [min, max]
+    max_features: [0.1, 1.0]       # Real range [min, max], will be uniform prior
+    bootstrap: [True, False]       # Categorical choices
+
+
+# Other general model-related parameters, if any
+mlflow_run_name: "EC_Contribution_Prediction_Bayesian_RF_Pipeline"

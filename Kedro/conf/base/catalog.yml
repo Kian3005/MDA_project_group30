@@ -1,0 +1,127 @@
+# ================================== Raw Data ================================== #
+
+# Raw input data (inputs to the raw_processing pipeline)
+# It's good practice to rename these to be descriptive of their *content*, not just their source.
+raw_project_data:
+  type: kedro_datasets.pandas.ExcelDataset
+  filepath: data/01_raw/project.xlsx
+
+raw_organization_data:
+  type: kedro_datasets.pandas.ExcelDataset
+  filepath: data/01_raw/organization.xlsx
+
+raw_output_data:
+  type: kedro_datasets.pandas.ExcelDataset
+  filepath: data/01_raw/project_output.xlsx
+
+# =========================== Raw Processing Pipeline ========================== #
+
+# Outputs of the 'raw_processing' pipeline
+# These names should match the 'outputs' specified in your raw_processing/pipeline.py
+merged_initial_clean_data:
+  type: kedro_datasets.pandas.CSVDataset
+  filepath: data/02_intermediate/merged_initial_clean_data.csv
+  save_args:
+    encoding: utf-8 
+
+cleaned_data_with_adjustments:
+  type: kedro_datasets.pandas.CSVDataset
+  filepath: data/02_intermediate/cleaned_data_with_adjustments.csv
+  save_args: # Add this section for all CSVDatasets to be safe
+    encoding: utf-8
+
+final_processed_data: # This is the final output of your raw_processing pipeline
+  type: kedro_datasets.pandas.CSVDataset
+  filepath: data/03_primary/final_processed_data.csv
+  save_args: # Add this section for all CSVDatasets to be safe
+    encoding: utf-8
+
+
+# ========================= Data Preprocessing Pipeline ======================== #
+
+# Inputs to this pipeline: 'final_processed_data' (from raw_processing)
+
+# Outputs of the 'data_preprocessing' pipeline
+topic_merging_library:
+  type: kedro_datasets.pandas.CSVDataset
+  filepath: data/02_intermediate/topic_merging_library.csv
+  save_args: # Add this section for all CSVDatasets to be safe
+    encoding: utf-8
+
+initial_mlb_data_for_topics:
+  # Crucial for saving the MultiLabelBinarizer's fitted state and mappings
+  type: kedro_datasets.pickle.PickleDataset
+  filepath: data/02_intermediate/initial_mlb_data_for_topics.pkl
+
+df_with_merged_topics:
+  type: kedro_datasets.pandas.CSVDataset
+  filepath: data/02_intermediate/df_with_merged_topics.csv
+  save_args: # Add this section for all CSVDatasets to be safe
+    encoding: utf-8
+
+df_with_consolidated_topics:
+  type: kedro_datasets.pandas.CSVDataset
+  filepath: data/02_intermediate/df_with_consolidated_topics.csv
+  save_args: # Add this section for all CSVDatasets to be safe
+    encoding: utf-8
+
+df_with_impact_continents:
+  type: kedro_datasets.pandas.CSVDataset
+  filepath: data/02_intermediate/df_with_impact_continents.csv
+  save_args: # Add this section for all CSVDatasets to be safe
+    encoding: utf-8
+
+preprocessed_data_final: # This is the main output of your data_preprocessing pipeline
+  type: kedro_datasets.pandas.CSVDataset
+  filepath: data/04_feature/preprocessed_data_final.csv
+  save_args: # Add this section for all CSVDatasets to be safe
+    encoding: utf-8
+
+# For the MultiLabelBinarizer objects
+mlb_impact_model:
+  type: pickle.PickleDataset # Or joblib.JoblibDataset if you prefer
+  filepath: data/06_models/mlb_impact.pkl # Or .joblib
+
+mlb_continents_model:
+  type: pickle.PickleDataset # Or joblib.JoblibDataset
+  filepath: data/06_models/mlb_continents.pkl # Or .joblib
+
+
+# ============================ Model Training Pipeline ========================= #
+
+# Inputs to this pipeline: 'preprocessed_data_final' (from data_preprocessing)
+
+# Outputs of the 'model_training' pipeline
+df_for_model_training:
+  type: kedro_datasets.pandas.CSVDataset
+  filepath: data/04_feature/df_for_model_training.csv
+  save_args: # Add this section for all CSVDatasets to be safe
+    encoding: utf-8
+
+trained_prediction_pipeline:
+  # The entire sklearn Pipeline (preprocessor + model) should be saved as one object
+  type: kedro_datasets.pickle.PickleDataset
+  filepath: data/07_model_output/trained_prediction_pipeline.pkl
+
+model_evaluation_metrics:
+  # Saving metrics as JSON is standard and readable
+  type: kedro_datasets.json.JSONDataset
+  filepath: data/07_model_output/model_evaluation_metrics.json
+
+# UI-related artifacts (lists for dropdowns/features)
+ui_topics_list:
+  type: kedro_datasets.pickle.PickleDataset
+  filepath: data/07_model_output/ui_topics_list.pkl
+
+ui_impacts_list:
+  type: kedro_datasets.pickle.PickleDataset
+  filepath: data/07_model_output/ui_impacts_list.pkl
+
+ui_continents_list:
+  type: kedro_datasets.pickle.PickleDataset
+  filepath: data/07_model_output/ui_continents_list.pkl
+
+model_feature_columns_order:
+  # This stores the exact order of columns expected by your trained pipeline
+  type: kedro_datasets.pickle.PickleDataset
+  filepath: data/07_model_output/model_feature_columns_order.pkl
