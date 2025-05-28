@@ -11,7 +11,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 from skopt import BayesSearchCV
-from skopt.space import Real, Integer
+from skopt.space import Real, Integer, Categorical 
+import mlflow
 
 log = logging.getLogger(__name__)
 
@@ -222,7 +223,7 @@ def train_model(
 def save_model_artifacts(
     trained_pipeline: Pipeline,
     metrics: dict,
-    preprocessed_data_final: pd.DataFrame # Use the input data to extract final column names
+    preprocessed_data_final: pd.DataFrame # This DataFrame is after all preprocessing and consolidation
 ) -> (Pipeline, dict, list, list, list, list):
     """
     Saves the trained pipeline and various artifacts needed for deployment (UI lists).
@@ -230,7 +231,8 @@ def save_model_artifacts(
     Args:
         trained_pipeline: The trained sklearn Pipeline object.
         metrics: Dictionary of evaluation metrics.
-        preprocessed_data_final: The input DataFrame to help extract feature names.
+        preprocessed_data_final: The input DataFrame to help extract final feature names
+                                 and generate UI lists based on its final state.
 
     Returns:
         The trained pipeline, metrics, and lists for UI (topics, impacts, continents, feature columns).
@@ -238,44 +240,54 @@ def save_model_artifacts(
     """
     log.info("Saving model and related artifacts.")
 
-    # Extract dynamic feature names from the trained preprocessor
-    # This is more robust as it reflects the actual features used in the trained pipeline
+    # Log metrics to MLflow
+    for metric_name, metric_value in metrics.items():
+        if isinstance(metric_value, (int, float)):
+            mlflow.log_metric(metric_name, metric_value)
+        elif isinstance(metric_value, dict): # For best_params or similar nested dicts
+            mlflow.log_params(metric_value)
+
+    # Access the preprocessor from the trained pipeline
     preprocessor = trained_pipeline.named_steps['preprocessor']
-    ohe_categories = preprocessor.named_transformers_['cat'].categories_
-    # Ensure the order of categorical features matches the order used by OneHotEncoder
-    categorical_features_used = [
-        col for col in ['legalBasis', 'fundingScheme', 'scientific_domain', 'sustainability', 'problem_type']
-        if col in preprocessed_data_final.columns
-    ]
-    ohe_feature_names = preprocessor.named_transformers_['cat'].get_feature_names_out(categorical_features_used)
 
-    # Re-extract numerical features (including topic, impact, continent) from the input dataframe
-    # This relies on the convention established in `data_preprocessing_nodes`
-    numerical_features_used = [
-        'project_length_days', 'number_of_organizations', 'proportion_of_small_and_medium_orgs'
-    ]
-    numerical_features_used = [f for f in numerical_features_used if f in preprocessed_data_final.columns] # filter for safety
+    final_processed_feature_names = preprocessor.get_feature_names_out()
+    log.info(f"Extracted final processed feature names using preprocessor.get_feature_names_out(): {len(final_processed_feature_names)} features.")
 
-    topic_columns = sorted([col for col in preprocessed_data_final.columns if col.startswith('topic_')])
-    impact_columns = sorted([col for col in preprocessed_data_final.columns if col.startswith('impact_')])
-    continents_columns = sorted([col for col in preprocessed_data_final.columns if col.startswith('continent_')])
+    # If you need to log the feature names for debugging or future use
+    mlflow.log_text(str(list(final_processed_feature_names)), "final_processed_feature_names_for_model.txt")
 
-    # Combine all feature names in the order they'd appear after preprocessing
-    final_feature_columns_order = list(numerical_features_used) + list(topic_columns) + list(impact_columns) + list(continents_columns) + list(ohe_feature_names)
 
-    # Prepare UI lists
-    # Remove 'topic_', 'impact_', 'continent_' prefixes and sort
-    # Ensure 'other' topic is handled specifically if it exists
-    raw_topics_for_ui = [col.replace('topic_', '') for col in topic_columns]
+    # Prepare UI lists based on the *actual columns present in the final preprocessed data*
+    # This is crucial because `consolidate_infrequent_topics` modifies these.
+
+    # Filter out columns that are not directly 'topic_', 'impact_', 'continent_' prefixes
+    # This helps in accurately getting the columns that were originally part of these categories.
+    topic_columns_final = sorted([col for col in preprocessed_data_final.columns if col.startswith('topic_')])
+    impact_columns_final = sorted([col for col in preprocessed_data_final.columns if col.startswith('impact_')])
+    continents_columns_final = sorted([col for col in preprocessed_data_final.columns if col.startswith('continent_')])
+
+    # Prepare UI lists - still based on the *final* columns from `preprocessed_data_final`
+    raw_topics_for_ui = [col.replace('topic_', '') for col in topic_columns_final]
     topics_without_other = [topic for topic in raw_topics_for_ui if topic.lower() != 'other']
-    other_topic_exists = 'topic_other' in topic_columns
+    other_topic_exists = 'topic_other' in topic_columns_final
     sorted_topics = sorted(topics_without_other)
     final_ui_topics = sorted_topics + ['other'] if other_topic_exists else sorted_topics
 
+    final_ui_impacts = sorted([col.replace('impact_', '') for col in impact_columns_final])
+    final_ui_continents = sorted([col.replace('continent_', '') for col in continents_columns_final])
 
-    final_ui_impacts = sorted([col.replace('impact_', '') for col in impact_columns])
-    final_ui_continents = sorted([col.replace('continent_', '') for col in continents_columns])
+    # Log the UI lists as artifacts if needed, or simply return them via Kedro's catalog
+    mlflow.log_text(str(final_ui_topics), "ui_topics.txt")
+    mlflow.log_text(str(final_ui_impacts), "ui_impacts.txt")
+    mlflow.log_text(str(final_ui_continents), "ui_continents.txt")
+
+    # Save the entire pipeline (preprocessor + best regressor)
+    # Using joblib for saving the scikit-learn pipeline
+    model_path = "model.pkl"
+    joblib.dump(trained_pipeline, model_path)
+    mlflow.log_artifact(model_path)
+    log.info(f"Model saved to {model_path} and logged to MLflow.")
 
     log.info("Model and artifacts prepared for saving.")
     # Return everything for Kedro's catalog to save
-    return trained_pipeline, metrics, final_ui_topics, final_ui_impacts, final_ui_continents, final_feature_columns_order
+    return trained_pipeline, metrics, final_ui_topics, final_ui_impacts, final_ui_continents, list(final_processed_feature_names) # Ensure it's a list for consistency
