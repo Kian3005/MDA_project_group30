@@ -2,7 +2,7 @@
 
 Data files are not included in the data folder of kedro project on the github repository since they are too large.
 
-Running this kedro project takes a very long time, which is why I couldn't run it entirely before the deadline (even though it was finished).
+Running this kedro project takes a very long time, which is why I couldn't run it entirely before the deadline (even though it was finished well before the deadline).
 I still ran into an error after the MDA project deadline, which has since been fixed.
 
 [![Powered by Kedro](https://img.shields.io/badge/powered_by-kedro-ffc900?logo=kedro)](https://kedro.org)
