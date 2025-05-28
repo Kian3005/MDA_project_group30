@@ -310,58 +310,60 @@ def generate_additional_features(processed_fulldf: pd.DataFrame) -> (pd.DataFram
 
 def consolidate_infrequent_topics(processed_fulldf: pd.DataFrame, parameters: dict) -> (pd.DataFrame, list):
     """
-    Identifies infrequent topic, impact, and continent columns and consolidates them into 'topic_other'.
+    Identifies infrequent topic columns and consolidates them into 'topic_other'.
+    Impact and continent columns will be left as is.
     """
     log.info("Starting consolidation of infrequent topics...")
     frequency_threshold_ratio = parameters['frequency_threshold_ratio']
 
-    # Identify all columns that should be treated as sparse features
-    # These are the one-hot encoded columns generated in previous steps
-    feature_cols_to_check = [
+    # ONLY identify columns that start with 'topic_' for consolidation
+    topic_cols_to_check = [
         col for col in processed_fulldf.columns
-        if col.startswith('topic_') or col.startswith('impact_') or col.startswith('continent_')
+        if col.startswith('topic_')
     ]
 
-    if not feature_cols_to_check:
-        log.warning("No feature columns (topic, impact, continent) found for frequency calculation. Skipping consolidation.")
-        return processed_fulldf, []
+    if not topic_cols_to_check:
+        log.warning("No topic columns found for frequency calculation. Skipping topic consolidation.")
+        return processed_fulldf, [] # Return original df and empty list if no topics
 
-    # Ensure all identified feature columns are Sparse[int8]
-    for col in feature_cols_to_check:
+    # Ensure all identified topic columns are Sparse[int8]
+    for col in topic_cols_to_check:
         if not pd.api.types.is_sparse(processed_fulldf[col].dtype):
             processed_fulldf[col] = processed_fulldf[col].astype('Sparse[int8]')
             log.info(f"Converted {col} to Sparse[int8]")
 
     # Calculate topic frequencies based on sparse data
-    # This is the corrected line: directly sum the sparse Series in the DataFrame slice
-    current_topic_counts = processed_fulldf[feature_cols_to_check].sum()
+    current_topic_counts = processed_fulldf[topic_cols_to_check].sum()
 
     total_rows = len(processed_fulldf)
-    infrequent_feature_columns = current_topic_counts[current_topic_counts / total_rows < frequency_threshold_ratio].index.tolist()
-    log.info(f"Number of infrequent topic/impact/continent columns identified: {len(infrequent_feature_columns)}")
+    infrequent_topic_columns = current_topic_counts[current_topic_counts / total_rows < frequency_threshold_ratio].index.tolist()
+    log.info(f"Number of infrequent topic columns identified: {len(infrequent_topic_columns)}")
 
-    if infrequent_feature_columns:
-        log.info(f"Consolidating into 'topic_other': {len(infrequent_feature_columns)} columns")
+    if infrequent_topic_columns:
+        log.info(f"Consolidating into 'topic_other': {len(infrequent_topic_columns)} columns")
         # Ensure 'topic_other' exists and is sparse
         if 'topic_other' not in processed_fulldf.columns:
             processed_fulldf['topic_other'] = pd.Series(0, index=processed_fulldf.index, dtype='Sparse[int8]')
 
-        # Sum the infrequent columns. The .any(axis=1) is a good way to represent 'if any of these topics are present'
-        # This operation will result in a Series, which then needs to be converted back to Sparse[int8] if not already.
-        infrequent_sum = processed_fulldf[infrequent_feature_columns].any(axis=1).astype('Sparse[int8]')
+        # Sum the infrequent columns (using .any(axis=1) for 'if any of these topics are present')
+        infrequent_sum = processed_fulldf[infrequent_topic_columns].any(axis=1).astype('Sparse[int8]')
 
         # Merge existing 'topic_other' with the new infrequent sum
         processed_fulldf['topic_other'] = (processed_fulldf['topic_other'].astype(bool) | infrequent_sum.astype(bool)).astype('Sparse[int8]')
 
-        # Drop the original infrequent feature columns
-        processed_fulldf = processed_fulldf.drop(columns=infrequent_feature_columns, errors='ignore')
+        # Drop the original infrequent topic columns
+        processed_fulldf = processed_fulldf.drop(columns=infrequent_topic_columns, errors='ignore')
     else:
-        log.info("No topic/impact/continent columns found below the frequency threshold. No consolidation performed.")
+        log.info("No topic columns found below the frequency threshold. No consolidation performed.")
         # If 'topic_other' exists but no topics were consolidated, remove it if it's all zeros
         if 'topic_other' in processed_fulldf.columns and processed_fulldf['topic_other'].sum() == 0:
             processed_fulldf = processed_fulldf.drop(columns=['topic_other'], errors='ignore')
 
-    # Reorder columns for consistency
+
+    # --- Column Reordering (Optional but good for consistency) ---
+    # This section remains largely the same as it just reorders columns for output consistency.
+    # It will include all 'impact_' and 'continent_' columns, whether or not they were infrequent.
+
     final_topic_cols = sorted([col for col in processed_fulldf.columns if col.startswith('topic_') and col != 'topic_other'])
     final_impact_cols = sorted([col for col in processed_fulldf.columns if col.startswith('impact_')])
     final_continent_cols = sorted([col for col in processed_fulldf.columns if col.startswith('continent_')])
