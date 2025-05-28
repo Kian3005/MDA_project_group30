@@ -96,35 +96,29 @@ def train_model(
     log.info("Starting model training and hyperparameter tuning.")
 
     # Define features and target
-    # Ensure these columns are available based on your data_preprocessing pipeline outputs
-    target_column = "log_ecMaxContribution" # Use the log-transformed target for training
+    target_column = "log_ecMaxContribution"
 
-    # Dynamic identification of topic, impact, and continent columns
-    # We need to ensure that the columns coming from the previous pipeline are correctly identified.
-    # This assumes a consistent naming convention.
     all_feature_columns = [col for col in df_no_outliers.columns if col not in ["id", "ecMaxContribution", target_column]]
 
-    # These lists should be passed as parameters if their exact names aren't fixed.
-    # For robustness, we dynamically identify them or rely on them being present after concat.
     topic_columns = [col for col in all_feature_columns if col.startswith('topic_')]
     impact_columns = [col for col in all_feature_columns if col.startswith('impact_')]
     continents_columns = [col for col in all_feature_columns if col.startswith('continent_')]
 
-    # Assuming other numerical and categorical features are stable
     categorical_features = ['legalBasis', 'fundingScheme', 'scientific_domain', 'sustainability', 'problem_type']
     numerical_features = ['project_length_days', 'number_of_organizations', 'proportion_of_small_and_medium_orgs']
 
-    # Filter out columns that might not exist in the dataframe after all merges/drops
     categorical_features = [f for f in categorical_features if f in df_no_outliers.columns]
     numerical_features = [f for f in numerical_features if f in df_no_outliers.columns]
 
-    # Add dynamic sparse features to numerical features
     numerical_features.extend(topic_columns)
     numerical_features.extend(impact_columns)
     numerical_features.extend(continents_columns)
 
+    # Ensure no duplicates in numerical features if extend was called multiple times
+    numerical_features = list(set(numerical_features))
+    categorical_features = list(set(categorical_features)) # Also for categorical
 
-    X = df_no_outliers.drop(columns=["id", "ecMaxContribution", target_column]) # 'id' is typically not a feature
+    X = df_no_outliers.drop(columns=["ecMaxContribution", target_column])
     y = df_no_outliers[target_column]
 
     log.info(f"Features used: {list(X.columns)}")
@@ -136,7 +130,7 @@ def train_model(
             ('num', StandardScaler(), numerical_features),
             ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features)
         ],
-        remainder='passthrough' # Keep other columns (like original 'main_topics' if not dropped)
+        remainder='passthrough'
     )
 
     # Define the Random Forest Regressor
@@ -144,14 +138,22 @@ def train_model(
     rf_model = RandomForestRegressor(random_state=rf_model_params.get('random_state', 42))
 
     # Define the search space for RandomForestRegressor from parameters
-    search_spaces_rf = parameters.get('bayes_search_space', {})
-    # Convert list/tuple ranges from YAML to skopt space objects
-    for key, value in search_spaces_rf.items():
-        if isinstance(value, list) and len(value) == 2 and isinstance(value[0], (int, float)):
-            if key == 'max_features' and isinstance(value[0], float):
-                 search_spaces_rf[key] = Real(value[0], value[1], prior='uniform')
-            else:
-                search_spaces_rf[key] = Integer(value[0], value[1])
+    search_spaces_rf = {}
+    raw_bayes_search_space = parameters.get('bayes_search_space', {})
+
+    for key, value in raw_bayes_search_space.items():
+        if key == 'max_features' and isinstance(value[0], float):
+            search_spaces_rf[key] = Real(value[0], value[1], prior='uniform')
+        elif key == 'bootstrap' and isinstance(value, list) and all(isinstance(v, bool) for v in value): # Handle 'bootstrap' specifically as categorical
+            search_spaces_rf[key] = Categorical(value)
+        elif isinstance(value, list) and len(value) == 2 and all(isinstance(v, int) for v in value):
+            search_spaces_rf[key] = Integer(value[0], value[1])
+        else:
+            # Fallback for unexpected types or structures.
+            # This will catch any hyperparameter definitions that don't fit the expected patterns.
+            raise ValueError(f"Unsupported hyperparameter type or format for '{key}': {value}. "
+                             "Expected a list of two ints for Integer, two floats for Real (only for max_features), "
+                             "or a list of booleans for Categorical.")
 
 
     # Set up BayesSearchCV for the Random Forest model
